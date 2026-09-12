@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Korean Flashcards</title>
+<style>
+  :root {
+    --bg: #17181c;
+    --surface-1: #202127;
+    --surface-2: #26272e;
+    --border: #34353c;
+    --text: #f2f2f3;
+    --text-secondary: #a3a4ab;
+    --text-muted: #6f7078;
+    --text-danger: #f56a6a;
+    --bg-warning: #3a2f1c;
+    --text-warning: #e0b25a;
+    --border-warning: #5a4a2a;
+    --bg-success: #1c3a26;
+    --text-success: #5ad182;
+    --border-success: #2a5a3d;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 20px 16px 60px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 16px;
+  }
+  select, input, button {
+    font: inherit;
+    background: var(--surface-1);
+    color: var(--text);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  button { cursor: pointer; }
+  button:active { opacity: 0.8; }
+</style>
+</head>
+<body>
+
+<h1>Korean Flashcards</h1>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+  <select id="lessonFilter" style="flex:1;min-width:120px;"></select>
+  <select id="categoryFilter" style="flex:1;min-width:120px;"></select>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:16px;">
+  <select id="modeFilter" style="flex:1;">
+    <option value="all">All cards</option>
+    <option value="learning">Still learning only</option>
+  </select>
+  <button id="directionBtn" style="flex:1;">한국어 → English</button>
+</div>
+
+<div id="stats" style="display:flex;gap:12px;font-size:13px;color:var(--text-secondary);margin-bottom:12px;flex-wrap:wrap;"></div>
+
+<div id="cardArea" style="margin-bottom:12px;"></div>
+
+<div id="answerButtons" style="display:none;gap:8px;margin-bottom:8px;">
+  <button id="learningBtn" style="flex:1;background:var(--bg-warning);color:var(--text-warning);border-color:var(--border-warning);">Still learning</button>
+  <button id="knowBtn" style="flex:1;background:var(--bg-success);color:var(--text-success);border-color:var(--border-success);">Know it</button>
+</div>
+
+<div style="display:flex;justify-content:flex-end;margin-bottom:20px;">
+  <button id="resetBtn" style="font-size:12px;color:var(--text-danger);border:none;background:none;padding:4px 0;">Reset progress for this view</button>
+</div>
+
+<div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:8px;">Add vocab</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-1);border-radius:12px;padding:12px;">
+  <input type="text" id="inKorean" placeholder="Korean, e.g. 학교">
+  <input type="text" id="inRoman" placeholder="Romanization, e.g. hakgyo">
+  <input type="text" id="inEnglish" placeholder="English, e.g. school" style="grid-column:span 2;">
+  <input type="text" id="inLesson" placeholder="Lesson, e.g. 3">
+  <input type="text" id="inCategory" placeholder="Category, e.g. places">
+  <button id="addBtn" style="grid-column:span 2;">Add card</button>
+  <div id="formError" style="grid-column:span 2;display:none;font-size:13px;color:var(--text-danger);"></div>
+</div>
+
+<script>
+(function(){
+const STORAGE_KEY = 'korean-flashcards-data';
+let cards = [];
+let progress = {};
+let direction = 'kr-en';
+let currentIndex = 0;
+let revealed = false;
+let deck = [];
+
+const seedCards = [
+  { id: 's1', korean: '학교', roman: 'hakgyo', english: 'school', lesson: '1', category: 'places' },
+  { id: 's2', korean: '친구', roman: 'chingu', english: 'friend', lesson: '1', category: 'people' },
+  { id: 's3', korean: '먹다', roman: 'meokda', english: 'to eat', lesson: '2', category: 'actions' },
+  { id: 's4', korean: '사과', roman: 'sagwa', english: 'apple', lesson: '2', category: 'food' },
+  { id: 's5', korean: '선생님', roman: 'seonsaengnim', english: 'teacher', lesson: '3', category: 'occupations' },
+];
+
+function loadData(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      cards = (parsed.cards && parsed.cards.length) ? parsed.cards : seedCards.slice();
+      progress = parsed.progress || {};
+      direction = parsed.direction || 'kr-en';
+    } else {
+      cards = seedCards.slice();
+    }
+  } catch(e) {
+    cards = seedCards.slice();
+  }
+}
+
+function saveData(){
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({cards, progress, direction})); }
+  catch(e) { console.error('save failed', e); }
+}
+
+function uniqueSorted(arr){
+  return [...new Set(arr)].sort((a,b)=>{
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a).localeCompare(String(b));
+  });
+}
+
+function populateFilters(){
+  const lessonSel = document.getElementById('lessonFilter');
+  const catSel = document.getElementById('categoryFilter');
+  const lessons = uniqueSorted(cards.map(c=>c.lesson).filter(Boolean));
+  const cats = uniqueSorted(cards.map(c=>c.category).filter(Boolean));
+  const prevLesson = lessonSel.value, prevCat = catSel.value;
+  lessonSel.innerHTML = '<option value="all">All lessons</option>' + lessons.map(l=>`<option value="${l}">Lesson ${l}</option>`).join('');
+  catSel.innerHTML = '<option value="all">All categories</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  if (lessons.includes(prevLesson)) lessonSel.value = prevLesson;
+  if (cats.includes(prevCat)) catSel.value = prevCat;
+}
+
+function buildDeck(){
+  const lessonSel = document.getElementById('lessonFilter').value;
+  const catSel = document.getElementById('categoryFilter').value;
+  const modeSel = document.getElementById('modeFilter').value;
+  deck = cards.filter(c=>{
+    if (lessonSel !== 'all' && c.lesson !== lessonSel) return false;
+    if (catSel !== 'all' && c.category !== catSel) return false;
+    if (modeSel === 'learning' && progress[c.id] !== 'learning') return false;
+    return true;
+  });
+  currentIndex = 0;
+  revealed = false;
+  renderCard();
+  renderStats();
+}
+
+function renderStats(){
+  const total = deck.length;
+  const known = deck.filter(c=>progress[c.id]==='know').length;
+  const learning = deck.filter(c=>progress[c.id]==='learning').length;
+  document.getElementById('stats').innerHTML = `<span>${total} in view</span><span>${known} known</span><span>${learning} still learning</span>`;
+}
+
+function renderCard(){
+  const area = document.getElementById('cardArea');
+  const answerButtons = document.getElementById('answerButtons');
+  if (deck.length === 0){
+    area.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:32px 16px;font-size:14px;">No cards match this filter. Add some vocab below.</div>';
+    answerButtons.style.display = 'none';
+    return;
+  }
+  const card = deck[currentIndex];
+  const front = direction === 'kr-en' ? card.korean : card.english;
+  const frontSub = direction === 'kr-en' ? card.roman : '';
+  const back = direction === 'kr-en' ? `${card.english}${card.roman ? ' · '+card.roman : ''}` : `${card.korean}${card.roman ? ' · '+card.roman : ''}`;
+  area.innerHTML = `
+    <div id="flashcard" style="background:var(--surface-2);border:0.5px solid var(--border);border-radius:12px;padding:32px 20px;min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;cursor:pointer;position:relative;">
+      <div style="position:absolute;top:10px;left:10px;font-size:11px;color:var(--text-muted);background:var(--surface-1);padding:3px 8px;border-radius:var(--radius);">Lesson ${card.lesson||'—'} · ${card.category||'uncategorized'}</div>
+      ${revealed ? `<div style="font-size:26px;font-weight:500;">${back}</div>` : `<div style="font-size:26px;font-weight:500;margin-bottom:6px;">${front}</div><div style="font-size:14px;color:var(--text-secondary);">${frontSub}</div>`}
+      <div style="position:absolute;bottom:8px;font-size:11px;color:var(--text-muted);">${revealed ? 'Tap to hide' : 'Tap to reveal'} · ${currentIndex+1} of ${deck.length}</div>
+    </div>
+  `;
+  document.getElementById('flashcard').onclick = ()=>{ revealed = !revealed; renderCard(); };
+  answerButtons.style.display = 'flex';
+}
+
+function nextCard(){
+  if (deck.length === 0) return;
+  currentIndex = (currentIndex + 1) % deck.length;
+  revealed = false;
+  renderCard();
+}
+
+function markCard(status){
+  const card = deck[currentIndex];
+  if (!card) return;
+  progress[card.id] = status;
+  saveData();
+  renderStats();
+  nextCard();
+}
+
+function addCard(){
+  const korean = document.getElementById('inKorean').value.trim();
+  const roman = document.getElementById('inRoman').value.trim();
+  const english = document.getElementById('inEnglish').value.trim();
+  const lesson = document.getElementById('inLesson').value.trim();
+  const category = document.getElementById('inCategory').value.trim();
+  const errorEl = document.getElementById('formError');
+  if (!korean || !english){
+    errorEl.textContent = 'Enter both Korean and English before adding.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  errorEl.style.display = 'none';
+  const id = 'c' + Date.now();
+  cards.push({id, korean, roman, english, lesson: lesson || 'unsorted', category: category || 'uncategorized'});
+  saveData();
+  populateFilters();
+  buildDeck();
+  document.getElementById('inKorean').value = '';
+  document.getElementById('inRoman').value = '';
+  document.getElementById('inEnglish').value = '';
+  document.getElementById('inLesson').value = '';
+  document.getElementById('inCategory').value = '';
+}
+
+function resetProgressForFilter(){
+  deck.forEach(c=>delete progress[c.id]);
+  saveData();
+  renderStats();
+  renderCard();
+}
+
+function toggleDirection(){
+  direction = direction === 'kr-en' ? 'en-kr' : 'kr-en';
+  document.getElementById('directionBtn').textContent = direction === 'kr-en' ? '한국어 → English' : 'English → 한국어';
+  revealed = false;
+  saveData();
+  renderCard();
+}
+
+document.getElementById('lessonFilter').addEventListener('change', buildDeck);
+document.getElementById('categoryFilter').addEventListener('change', buildDeck);
+document.getElementById('modeFilter').addEventListener('change', buildDeck);
+document.getElementById('directionBtn').addEventListener('click', toggleDirection);
+document.getElementById('knowBtn').addEventListener('click', ()=>markCard('know'));
+document.getElementById('learningBtn').addEventListener('click', ()=>markCard('learning'));
+document.getElementById('resetBtn').addEventListener('click', resetProgressForFilter);
+document.getElementById('addBtn').addEventListener('click', addCard);
+
+loadData();
+document.getElementById('directionBtn').textContent = direction === 'kr-en' ? '한국어 → English' : 'English → 한국어';
+populateFilters();
+buildDeck();
+})();
+</script>
+
+</body>
+</html>
